@@ -81,6 +81,7 @@ fi
 # Restart Docker Compose with the new password
 # docker-compose down
 sudo docker-compose pull
+sudo docker-compose down
 sudo docker-compose up -d
 
 sleep 5
