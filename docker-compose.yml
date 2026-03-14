@@ -11,7 +11,8 @@ services:
       - gpm_login_global_private_server_mysql
     volumes:
       - ./.env:/var/www/html/.env
-      - gpm_login_global_private_server_web_storage:/var/www/html/storage
+      # mount all use for update code
+      - gpm_login_global_private_server_web_storage:/var/www/html
       - ./apache/000-default.conf:/etc/apache2/sites-available/000-default.conf
       - ./php/php_large_file_upload.ini:/usr/local/etc/php/conf.d/php_large_file_upload.ini
 
