@@ -64,6 +64,29 @@ done
 if [ -f .env ]; then
     # Check if DB_PASSWORD exists and is set to 'password'
     if grep -q "^DB_PASSWORD=password" .env; then
+        # If DB_PASSWORD is set to 'password'
+        # Check any GPM containers are already running
+        CONTAINERS_TO_CHECK=(
+            "gpm_login_global_private_server_web"
+            "gpm_login_global_private_server_mysql"
+        )
+    
+        FOUND_CONTAINERS=()
+        for container in "${CONTAINERS_TO_CHECK[@]}"; do
+            if sudo docker ps -a --format '{{.Names}}' | grep -q "^${container}$"; then
+                FOUND_CONTAINERS+=("$container")
+            fi
+        done
+
+        if [ ${#FOUND_CONTAINERS[@]} -gt 0 ]; then
+            echo "ERROR: The following containers already exist:"
+            for c in "${FOUND_CONTAINERS[@]}"; do
+                echo "  - $c"
+            done
+            echo "Please cd to old folder"
+            exit 1
+        fi
+
         # Update the password in the .env file
         # sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$RANDOM_PASSWORD/" .env
         sed -i.bak "s/^DB_PASSWORD=.*/DB_PASSWORD=${RANDOM_PASSWORD}/" .env
