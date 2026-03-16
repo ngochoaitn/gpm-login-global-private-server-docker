@@ -5,7 +5,7 @@
 - Private server: default port 80
     - Default username: administrator
     - Default password: administrator
-- phpMyAdmin: default port 8081
+- phpMyAdmin: default port 8082
     - Default username: root
     - Default password: {random in file .env}
 

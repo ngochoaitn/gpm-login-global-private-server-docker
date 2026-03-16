@@ -5,7 +5,7 @@
 - Private server: cổng mặc định 80
     - Tài khoản mặc định: administrator
     - Mật khẩu mặc định: administrator
-- phpMyAdmin: cổng mặc định 8081
+- phpMyAdmin: cổng mặc định 8082
     - Default username: root
     - Default password: {mặc định trong tệp .env}
 
