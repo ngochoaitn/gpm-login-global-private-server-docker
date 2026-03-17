@@ -33,7 +33,7 @@ sudo ./click-once-ubuntu-22-04.sh
 
 #### Windows
 - Step 1: Install [Docker desktop](https://www.docker.com/products/docker-desktop/) (verify by running the commands `docker --version` and `docker-compose --version`)
-- Step 2: [Download](https://github.com/ngochoaitn/gpm-login-global-private-server-docker/archive/refs/heads/main.zip) or clone this repository
+- Step 2: [Download](https://github.com/ngochoaitn/gpm-login-global-private-server-docker/archive/refs/heads/main.zip) and extract or clone this repository
 - Step 3: Double click file `click-once-windows.bat`
 - Step 4: (optional, recommend): If you want to save the profile on S3, log in to the private server (default port 80) and configure the "Storage setting" in the web GUI.
 - Step 5 (optional): Enable Docker to start automatically on system startup
@@ -41,7 +41,7 @@ sudo ./click-once-ubuntu-22-04.sh
 
 #### macOS
 - Step 1: Install [Docker desktop](https://www.docker.com/products/docker-desktop/) (verify by running the commands `docker --version` and `docker-compose --version`)
-- Step 2: [Download](https://github.com/ngochoaitn/gpm-login-global-private-server-docker/archive/refs/heads/main.zip) or clone this repository
+- Step 2: [Download](https://github.com/ngochoaitn/gpm-login-global-private-server-docker/archive/refs/heads/main.zip) and extract or clone this repository
 - Step 3: Run the command (you may need to use sudo)
 ```
 chmod +x click-once-mac.sh

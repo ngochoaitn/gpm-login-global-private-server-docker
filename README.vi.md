@@ -33,7 +33,7 @@ sudo ./click-once-ubuntu-22-04.sh
 
 #### Windows
 - Bước 1: Cài đặt [Docker desktop](https://www.docker.com/products/docker-desktop/) (xác minh bằng cách chạy các lệnh `docker --version` và `docker-compose --version`)
-- Bước 2: [Tải về](https://github.com/ngochoaitn/gpm-login-global-private-server-docker/archive/refs/heads/main.zip) hoặc clone git này
+- Bước 2: [Tải về](https://github.com/ngochoaitn/gpm-login-global-private-server-docker/archive/refs/heads/main.zip) và giải nén hoặc clone git này
 - Bước 3: Nhấp đúp vào tệp `click-once-windows.bat`
 - Bước 4 (tùy chọn, khuyến nghị): Nếu bạn muốn lưu profile trên S3, đăng nhập vào private server (cổng mặc định 80) và cấu hình mục "Storage setting" của private server.
 - Bước 5 (tùy chọn): Bật Docker khởi động cùng máy tính
@@ -41,7 +41,7 @@ sudo ./click-once-ubuntu-22-04.sh
 
 #### macOS
 - Bước 1: Cài đặt [Docker desktop](https://www.docker.com/products/docker-desktop/) (xác minh bằng cách chạy các lệnh `docker --version` và `docker-compose --version`)
-- Bước 2: [Tải về](https://github.com/ngochoaitn/gpm-login-global-private-server-docker/archive/refs/heads/main.zip) hoặc clone git này
+- Bước 2: [Tải về](https://github.com/ngochoaitn/gpm-login-global-private-server-docker/archive/refs/heads/main.zip) và giải nén hoặc clone git này
 - Bước 3: Chạy lệnh
 ```
 chmod +x click-once-mac.sh
