@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# ubuntu.sh
+# ubuntu-to-ubuntu
 #
 # Di chuyển (migrate) GPM Login private server (docker stack + volumes) giữa 2 VPS.
 #
@@ -19,10 +19,10 @@
 #   7. docker compose up -d, sửa quyền, kiểm tra health (web/phpmyadmin/mysql)
 #
 # Cách dùng:
-#   chmod +x ubuntu.sh
-#   sudo ./ubuntu.sh           # sẽ hỏi thông tin nguồn
+#   chmod +x ubuntu-to-ubuntu
+#   sudo ./ubuntu-to-ubuntu           # sẽ hỏi thông tin nguồn
 #   # hoặc truyền sẵn qua biến môi trường:
-#   sudo SRC_HOST=1.2.3.4 SRC_PASS='xxx' ./ubuntu.sh
+#   sudo SRC_HOST=1.2.3.4 SRC_PASS='xxx' ./ubuntu-to-ubuntu
 ###############################################################################
 set -euo pipefail
 
