@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# ubuntu-to-ubuntu
+# ubuntu-to-ubuntu.sh
 #
 # Di chuyển (migrate) GPM Login private server (docker stack + volumes) giữa 2 VPS.
 #
@@ -19,10 +19,10 @@
 #   7. docker compose up -d, sửa quyền, kiểm tra health (web/phpmyadmin/mysql)
 #
 # Cách dùng:
-#   chmod +x ubuntu-to-ubuntu
-#   sudo ./ubuntu-to-ubuntu           # sẽ hỏi thông tin nguồn
+#   chmod +x ubuntu-to-ubuntu.sh
+#   sudo ./ubuntu-to-ubuntu.sh           # sẽ hỏi thông tin nguồn
 #   # hoặc truyền sẵn qua biến môi trường:
-#   sudo SRC_HOST=1.2.3.4 SRC_PASS='xxx' ./ubuntu-to-ubuntu
+#   sudo SRC_HOST=1.2.3.4 SRC_PASS='xxx' ./ubuntu-to-ubuntu.sh
 ###############################################################################
 set -euo pipefail
 
@@ -90,8 +90,14 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o Connect
           -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -p "$SRC_PORT")
 log "Mở kết nối SSH master tới nguồn $SRC_USER@$SRC_HOST:$SRC_PORT (dùng lại 1 kết nối để tránh rate-limit)…"
 sshpass -p "$SRC_PASS" ssh "${SSH_OPTS[@]}" \
-   -o ControlMaster=yes -o ControlPath="$SOCK" -o Co
+   -o ControlMaster=yes -o ControlPath="$SOCK" -o ControlPersist=8h \
+   -fN "$SRC_USER@$SRC_HOST" \
+  || die "Không mở được SSH master tới nguồn (sai mật khẩu/cổng hoặc bị chặn)."
+ok "Đã mở kết nối master tới nguồn."
 RS_E="sshpass -p $(printf %q "$SRC_PASS") ssh -o ControlPath=$SOCK ${SSH_OPTS[*]}"
+
+# Chạy lệnh trên NGUỒN qua kết nối master đã mở (tái dùng, khỏi nhập lại mật khẩu)
+rcmd() { ssh -o ControlPath="$SOCK" "$SRC_USER@$SRC_HOST" "$@"; }
 
 # ------------------------ Phát hiện volume trên nguồn ------------------------
 log "Kiểm tra dữ liệu trên nguồn…"
@@ -149,6 +155,11 @@ ok "Đã copy app (compose, .env, config)."
 
 # --------------------------- rsync từng volume ------------------------------
 rsync_volume() {  # $1 = tên volume
+  local v="$1"
+  local src="$VOL_ROOT/$v/_data/"
+  local dst="$VOL_ROOT/$v/_data/"
+  docker volume create "$v" >/dev/null 2>&1 || true   # đăng ký volume với docker (giữ nguyên _data nếu đã có)
+  mkdir -p "$dst"
   log "rsync volume $v …"
   rsync -aHAX --numeric-ids --info=progress2 --partial -e "$RS_E" \
         "$SRC_USER@$SRC_HOST:$src" "$dst"
