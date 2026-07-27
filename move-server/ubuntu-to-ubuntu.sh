@@ -30,8 +30,8 @@ set -euo pipefail
 
 # ----------------------------- Cấu hình đầu vào ------------------------------
 SRC_HOST="${SRC_HOST:-}"          # IP VPS nguồn
-SRC_PORT="${SRC_PORT:-22}"        # cổng SSH nguồn
-SRC_USER="${SRC_USER:-root}"      # user SSH nguồn
+SRC_PORT="${SRC_PORT:-}"          # cổng SSH nguồn (trống = sẽ hỏi, mặc định 22)
+SRC_USER="${SRC_USER:-}"          # user SSH nguồn (trống = sẽ hỏi, mặc định root)
 SRC_PASS="${SRC_PASS:-}"          # mật khẩu SSH nguồn
 APP_PARENT="${APP_PARENT:-/root}" # thư mục cha chứa app (trên CẢ nguồn lẫn đích)
 APP_NAME="${APP_NAME:-gpm-login-private-server-docker}"  # tên thư mục app = tên project compose
