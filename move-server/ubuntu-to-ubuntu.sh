@@ -13,6 +13,8 @@
 #   1. Cài docker + docker compose + rsync + sshpass (nếu thiếu)
 #   2. (Tuỳ chọn) Mở rộng đĩa LVM để đủ chỗ chứa dữ liệu
 #   3. Mở 1 kết nối SSH master tới nguồn (tránh iptables rate-limit trên nguồn)
+#   3b. Nếu Docker nguồn đang chạy stack: DỪNG stack nguồn trước khi copy (để DB
+#       nhất quán), copy xong START lại. Nếu Docker nguồn lỗi: copy 'nóng' như cũ.
 #   4. Copy thư mục app (docker-compose, .env, config...) nguồn -> đích
 #   5. Tự phát hiện & rsync tất cả docker volume của project (giữ nguyên uid/gid)
 #   6. Xác minh lại (rsync pass 2 = 0 byte + so số file)
@@ -44,7 +46,23 @@ warn() { echo -e "${c_y}  ! $*${c_0}"; }
 die()  { echo -e "${c_r}  ✗ $*${c_0}" >&2; exit 1; }
 ask()  { local p="$1" d="${2:-}" a; if [ -n "$d" ]; then read -rp "$p [$d]: " a; echo "${a:-$d}"; else read -rp "$p: " a; echo "$a"; fi; }
 
-cleanup() { ssh -O exit -o ControlPath="$SOCK" "$SRC_USER@$SRC_HOST" 2>/dev/null || true; rm -f "$SOCK"; }
+SRC_STOPPED=0   # =1 khi đã DỪNG stack nguồn (để biết có cần start lại không)
+
+# Start lại stack nguồn nếu trước đó ta đã chủ động dừng nó
+restart_src_if_needed() {
+  [ "$SRC_STOPPED" = "1" ] || return 0
+  log "Khởi động lại stack trên NGUỒN…"
+  if rcmd "cd '$APP_DIR' && docker compose start" >/dev/null 2>&1; then
+    SRC_STOPPED=0; ok "Đã start lại stack nguồn."
+  else
+    warn "KHÔNG start lại được stack nguồn! Hãy tự chạy trên nguồn: cd $APP_DIR && docker compose start"
+  fi
+}
+cleanup() {
+  restart_src_if_needed   # an toàn: nếu script chết sau khi đã dừng nguồn, vẫn bật lại
+  ssh -O exit -o ControlPath="$SOCK" "$SRC_USER@$SRC_HOST" 2>/dev/null || true
+  rm -f "$SOCK"
+}
 trap cleanup EXIT
 
 # ------------------------------- Preflight ----------------------------------
@@ -110,6 +128,21 @@ NEED_BYTES=$(rcmd "du -scb ${VOL_ROOT}/${APP_NAME}_*/_data 2>/dev/null | tail -1
 NEED_H=$(numfmt --to=iec "$NEED_BYTES" 2>/dev/null || echo "${NEED_BYTES}B")
 log "Tổng dung lượng volume cần chuyển: ~$NEED_H"
 
+# --------------- Kiểm tra Docker trên NGUỒN (quyết định dừng hay copy nóng) ---
+SRC_DOCKER_OK=0; SRC_WAS_RUNNING=0
+if rcmd "docker info" >/dev/null 2>&1; then
+  SRC_DOCKER_OK=1
+  RUNNING_Q=$(rcmd "cd '$APP_DIR' 2>/dev/null && docker compose ps -q 2>/dev/null" 2>/dev/null || true)
+  if [ -n "$RUNNING_Q" ]; then
+    SRC_WAS_RUNNING=1
+    ok "Docker nguồn OK, stack đang CHẠY → sẽ DỪNG khi copy để dữ liệu nhất quán, xong START lại."
+  else
+    warn "Docker nguồn OK nhưng stack không chạy → copy trực tiếp (không cần dừng)."
+  fi
+else
+  warn "Docker nguồn KHÔNG hoạt động → copy 'nóng' như hiện tại (không dừng được; DB có thể không nhất quán)."
+fi
+
 # --------------------- (Tuỳ chọn) Mở rộng đĩa trên đích ---------------------
 AVAIL_BYTES=$(df --output=avail -B1 / | tail -1 | tr -d ' ')
 if [ "$AVAIL_BYTES" -lt $((NEED_BYTES + 5*1024*1024*1024)) ]; then
@@ -147,6 +180,16 @@ if [ -f "$APP_DIR/docker-compose.yml" ] && docker compose -f "$APP_DIR/docker-co
   (cd "$APP_DIR" && docker compose down) || true
 fi
 
+# ----------------- Dừng stack NGUỒN (nếu đang chạy) để copy nhất quán --------
+if [ "$SRC_WAS_RUNNING" = "1" ]; then
+  log "Dừng stack trên NGUỒN để đồng bộ nhất quán…"
+  if rcmd "cd '$APP_DIR' && docker compose stop" >/dev/null 2>&1; then
+    SRC_STOPPED=1; ok "Đã dừng stack nguồn (sẽ start lại ngay sau khi copy xong)."
+  else
+    warn "Không dừng được stack nguồn — tiếp tục copy 'nóng' (DB có thể không nhất quán)."
+  fi
+fi
+
 # --------------------------- Copy thư mục app -------------------------------
 log "Copy thư mục app nguồn -> đích ($APP_DIR)…"
 mkdir -p "$APP_DIR"
@@ -172,6 +215,9 @@ rsync_volume() {  # $1 = tên volume
   else warn "$v: pass2 chuyển thêm ${moved:-?} file, nguồn=$ns đích=$nd — kiểm tra lại!"; fi
 }
 for v in "${SRC_VOLS[@]}"; do rsync_volume "$v"; done
+
+# --------------- Start lại stack NGUỒN ngay sau khi copy xong ----------------
+restart_src_if_needed   # giảm tối đa downtime nguồn (không đợi tới khi đích boot xong)
 
 # --------------------------- Khởi động & kiểm tra ---------------------------
 log "Khởi động stack trên đích…"
