@@ -121,10 +121,63 @@ rcmd() { ssh -o ControlPath="$SOCK" "$SRC_USER@$SRC_HOST" "$@"; }
 log "Kiểm tra dữ liệu trên nguồn…"
 rcmd "test -d '$APP_DIR'" || die "Không thấy thư mục app '$APP_DIR' trên nguồn."
 VOL_ROOT="/var/lib/docker/volumes"
-mapfile -t SRC_VOLS < <(rcmd "ls -d $VOL_ROOT/${APP_NAME}_*/ 2>/dev/null | xargs -n1 basename 2>/dev/null" || true)
-[ "${#SRC_VOLS[@]}" -gt 0 ] || die "Không tìm thấy volume nào tên '${APP_NAME}_*' trên nguồn."
+
+# Tìm file compose trên nguồn
+SRC_COMPOSE=""
+for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+  if rcmd "test -f '$APP_DIR/$f'"; then SRC_COMPOSE="$APP_DIR/$f"; break; fi
+done
+[ -n "$SRC_COMPOSE" ] || die "Không thấy docker-compose.yml trên nguồn ($APP_DIR)."
+
+# Đọc nội dung compose về (chỉ đọc file → không cần docker daemon nguồn còn sống)
+_CTMP=$(mktemp)
+rcmd "cat '$SRC_COMPOSE'" > "$_CTMP" 2>/dev/null || { rm -f "$_CTMP"; die "Không đọc được compose trên nguồn."; }
+
+# Giải tên volume ON-DISK từ section 'volumes:' cấp cao nhất của compose:
+#   - có 'name:' -> dùng đúng tên đó                (bản global: gpm_login_global_private_server_*)
+#   - không có   -> mặc định '<APP_NAME>_<key>'     (bản cũ: gpm-login-private-server-docker_*)
+mapfile -t SRC_VOLS < <(
+  awk -v app="$APP_NAME" '
+    function trim(s){ gsub(/^[ \t]+|[ \t]+$/,"",s); return s }
+    /^volumes:[ \t]*$/ { invol=1; next }
+    /^[^ \t]/ { if (invol) invol=0 }                     # dòng cột 0 khác => hết section volumes
+    invol {
+      if ($0 ~ /^[ \t]+[A-Za-z0-9._-]+:[ \t]*$/) {       # khoá volume: "  ten:" (không gì phía sau)
+        k=trim($0); sub(/:$/,"",k); curkey=k; order[++n]=k; name[k]=""; next
+      }
+      if (curkey!="" && $0 ~ /^[ \t]+name:[ \t]*/) {      # override "name:"
+        v=$0; sub(/^[ \t]+name:[ \t]*/,"",v); gsub(/"/,"",v); name[curkey]=trim(v)
+      }
+    }
+    END { for(i=1;i<=n;i++){ k=order[i]; print (name[k]!="" ? name[k] : app"_"k) } }
+  ' "$_CTMP"
+)
+rm -f "$_CTMP"
+
+# Fallback: parse không ra gì -> quay lại cách cũ (glob theo APP_NAME)
+if [ "${#SRC_VOLS[@]}" -eq 0 ]; then
+  warn "Không phân tích được volume từ compose — thử dò theo '${APP_NAME}_*'."
+  mapfile -t SRC_VOLS < <(rcmd "ls -d $VOL_ROOT/${APP_NAME}_*/ 2>/dev/null | xargs -n1 basename 2>/dev/null" || true)
+fi
+
+# Chỉ giữ volume THỰC SỰ có trên đĩa nguồn
+_present=()
+for v in "${SRC_VOLS[@]}"; do
+  [ -n "$v" ] || continue
+  if rcmd "test -d '$VOL_ROOT/$v/_data'"; then _present+=("$v")
+  else warn "Bỏ qua '$v' (không thấy $VOL_ROOT/$v/_data trên nguồn)."; fi
+done
+SRC_VOLS=("${_present[@]}")
+[ "${#SRC_VOLS[@]}" -gt 0 ] || die "Không tìm thấy volume dữ liệu nào của project trên nguồn."
+
 log "Các volume sẽ chuyển:"; for v in "${SRC_VOLS[@]}"; do echo "    - $v"; done
-NEED_BYTES=$(rcmd "du -scb ${VOL_ROOT}/${APP_NAME}_*/_data 2>/dev/null | tail -1 | cut -f1" || echo 0)
+
+# Tổng dung lượng cần chuyển (du từng volume đã giải tên)
+NEED_BYTES=0
+for v in "${SRC_VOLS[@]}"; do
+  b=$(rcmd "du -sb '$VOL_ROOT/$v/_data' 2>/dev/null | cut -f1" || echo 0)
+  NEED_BYTES=$(( NEED_BYTES + ${b:-0} ))
+done
 NEED_H=$(numfmt --to=iec "$NEED_BYTES" 2>/dev/null || echo "${NEED_BYTES}B")
 log "Tổng dung lượng volume cần chuyển: ~$NEED_H"
 
@@ -225,8 +278,13 @@ cd "$APP_DIR"
 docker compose up -d
 sleep 20
 
-# Sửa quyền như installer gốc
-WEB_CT=$(docker compose ps -q web 2>/dev/null || true)
+# ----- Tự xác định tên service web / mysql (khác nhau giữa các bản) ----------
+SERVICES=$(docker compose config --services 2>/dev/null || true)
+WEB_SVC=$(echo "$SERVICES"   | grep -iE 'web'           | head -1 || true)
+MYSQL_SVC=$(echo "$SERVICES" | grep -iE 'mysql|mariadb' | head -1 || true)
+
+# Sửa quyền như installer gốc (service web dù tên gì)
+WEB_CT=$([ -n "$WEB_SVC" ] && docker compose ps -q "$WEB_SVC" 2>/dev/null || true)
 if [ -n "$WEB_CT" ]; then
   docker exec "$WEB_CT" chmod 777 /var/www/html/.env 2>/dev/null || true
   docker exec "$WEB_CT" chmod -R 777 /var/www/html/storage 2>/dev/null || true
@@ -238,14 +296,7 @@ PMA_PORT=$(grep -E '^PMA_PORT=' "$APP_DIR/.env" | cut -d= -f2 | tr -d '"' ); PMA
 
 echo; echo -e "${c_b}==== KIỂM TRA ====${c_0}"
 docker compose ps
-MY_CT=$(docker compose ps -q mysql 2>/dev/null || true)
-[ -n "$MY_CT" ] && { docker exec "$MY_CT" mysqladmin ping 2>/dev/null | grep -q alive && ok "MySQL alive" || warn "MySQL chưa sẵn sàng (chờ thêm rồi kiểm tra lại)"; }
-WEB_PORT=$(grep -E '^WEB_PORT=' "$APP_DIR/.env" | cut -d= -f2 | tr -d '"' ); WEB_PORT=${WEB_PORT:-80}
-PMA_PORT=$(grep -E '^PMA_PORT=' "$APP_DIR/.env" | cut -d= -f2 | tr -d '"' ); PMA_PORT=${PMA_PORT:-8081}
-
-echo; echo -e "${c_b}==== KIỂM TRA ====${c_0}"
-docker compose ps
-MY_CT=$(docker compose ps -q mysql 2>/dev/null || true)
+MY_CT=$([ -n "$MYSQL_SVC" ] && docker compose ps -q "$MYSQL_SVC" 2>/dev/null || true)
 [ -n "$MY_CT" ] && { docker exec "$MY_CT" mysqladmin ping 2>/dev/null | grep -q alive && ok "MySQL alive" || warn "MySQL chưa sẵn sàng (chờ thêm rồi kiểm tra lại)"; }
 wc=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$WEB_PORT/" || echo 000);  [ "$wc" = 200 ] && ok "Web HTTP $wc (cổng $WEB_PORT)" || warn "Web HTTP $wc"
 pc=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PMA_PORT/" || echo 000); [ "$pc" = 200 ] && ok "phpMyAdmin HTTP $pc (cổng $PMA_PORT)" || warn "phpMyAdmin HTTP $pc"
