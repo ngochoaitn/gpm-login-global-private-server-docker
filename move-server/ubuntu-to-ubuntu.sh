@@ -33,8 +33,9 @@ SRC_HOST="${SRC_HOST:-}"          # IP VPS nguồn
 SRC_PORT="${SRC_PORT:-}"          # cổng SSH nguồn (trống = sẽ hỏi, mặc định 22)
 SRC_USER="${SRC_USER:-}"          # user SSH nguồn (trống = sẽ hỏi, mặc định root)
 SRC_PASS="${SRC_PASS:-}"          # mật khẩu SSH nguồn
-APP_PARENT="${APP_PARENT:-/root}" # thư mục cha chứa app (trên CẢ nguồn lẫn đích)
-APP_NAME="${APP_NAME:-gpm-login-private-server-docker}"  # tên thư mục app = tên project compose
+APP_PARENT="${APP_PARENT:-/root}" # thư mục cha ưu tiên tìm app trên nguồn
+APP_NAME="${APP_NAME:-gpm-login-private-server-docker}"  # tên thư mục app mặc định (sẽ tự dò lại)
+APP_DIR_OVERRIDE="${APP_DIR:-}"   # nếu đặt sẵn APP_DIR thì bỏ qua bước tự dò
 AUTO_EXPAND_DISK="${AUTO_EXPAND_DISK:-ask}"  # yes | no | ask
 
 SOCK="/tmp/.gpm_migrate_$$.sock"
@@ -74,8 +75,7 @@ echo -e "${c_b}==== GPM SERVER MIGRATION (chạy trên VPS ĐÍCH, kéo từ ngu
 [ -z "$SRC_PORT" ] && SRC_PORT=$(ask "Cổng SSH nguồn" "22")
 [ -z "$SRC_USER" ] && SRC_USER=$(ask "User SSH nguồn" "root")
 if [ -z "$SRC_PASS" ]; then read -rsp "Mật khẩu SSH nguồn: " SRC_PASS; echo; fi
-APP_NAME=$(ask "Tên thư mục app (project)" "$APP_NAME")
-APP_DIR="$APP_PARENT/$APP_NAME"
+# APP_DIR sẽ được TỰ DÒ trên nguồn sau khi mở SSH (xem khối "Tự dò thư mục app").
 [ -z "$SRC_HOST" ] && die "Thiếu IP nguồn."
 [ -z "$SRC_PASS" ] && die "Thiếu mật khẩu nguồn."
 
@@ -117,9 +117,54 @@ RS_E="sshpass -p $(printf %q "$SRC_PASS") ssh -o ControlPath=$SOCK ${SSH_OPTS[*]
 # Chạy lệnh trên NGUỒN qua kết nối master đã mở (tái dùng, khỏi nhập lại mật khẩu)
 rcmd() { ssh -o ControlPath="$SOCK" "$SRC_USER@$SRC_HOST" "$@"; }
 
+# ------------------------ Tự dò thư mục app trên nguồn -----------------------
+# (tái dùng master -> không mở TCP mới -> an toàn với rate-limit của nguồn)
+log "Dò thư mục app trên nguồn…"
+APP_DIR=""
+if [ -n "$APP_DIR_OVERRIDE" ]; then
+  APP_DIR="$APP_DIR_OVERRIDE"
+else
+  # thứ tự ưu tiên: tên mặc định -> bản -docker -> bản global -> trong /opt
+  CANDIDATES=(
+    "$APP_PARENT/$APP_NAME"
+    "$APP_PARENT/gpm-login-private-server-docker"
+    "$APP_PARENT/gpm-login-global-private-server"
+    "/opt/gpm-login-private-server-docker"
+    "/opt/gpm-login-global-private-server"
+  )
+  # 1) ưu tiên thư mục có file compose
+  for c in "${CANDIDATES[@]}"; do
+    if rcmd "test -f '$c/docker-compose.yml' -o -f '$c/docker-compose.yaml' -o -f '$c/compose.yml' -o -f '$c/compose.yaml'" 2>/dev/null; then
+      APP_DIR="$c"; break
+    fi
+  done
+  # 2) nếu chưa thấy, chấp nhận thư mục tồn tại
+  if [ -z "$APP_DIR" ]; then
+    for c in "${CANDIDATES[@]}"; do
+      if rcmd "test -d '$c'" 2>/dev/null; then APP_DIR="$c"; break; fi
+    done
+  fi
+  # 3) vẫn chưa thấy -> quét /opt, /root, /home tìm compose liên quan gpm/login
+  if [ -z "$APP_DIR" ]; then
+    warn "Chưa thấy ở vị trí mặc định — quét /opt, /root, /home…"
+    hit=$(rcmd "find /opt /root /home -maxdepth 3 \( -name docker-compose.y*ml -o -name compose.y*ml \) 2>/dev/null | grep -iE 'gpm|login' | head -1" 2>/dev/null || true)
+    [ -n "$hit" ] && APP_DIR="$(dirname "$hit")"
+  fi
+fi
+# 4) vẫn không thấy -> hỏi user nhập đường dẫn (lặp tới khi hợp lệ)
+while [ -z "$APP_DIR" ] || ! rcmd "test -d '$APP_DIR'" 2>/dev/null; do
+  [ -n "$APP_DIR" ] && warn "Không thấy thư mục '$APP_DIR' trên nguồn."
+  warn "Không tự tìm được thư mục app trên nguồn."
+  APP_DIR=$(ask "Nhập ĐƯỜNG DẪN TUYỆT ĐỐI thư mục app trên nguồn (chứa docker-compose.yml)")
+  [ -z "$APP_DIR" ] && die "Không có đường dẫn — dừng."
+done
+APP_DIR="${APP_DIR%/}"
+APP_NAME="$(basename "$APP_DIR")"
+APP_PARENT="$(dirname "$APP_DIR")"
+ok "Thư mục app trên nguồn: $APP_DIR (project=$APP_NAME)"
+
 # ------------------------ Phát hiện volume trên nguồn ------------------------
 log "Kiểm tra dữ liệu trên nguồn…"
-rcmd "test -d '$APP_DIR'" || die "Không thấy thư mục app '$APP_DIR' trên nguồn."
 VOL_ROOT="/var/lib/docker/volumes"
 
 # Tìm file compose trên nguồn
